@@ -10,15 +10,13 @@
         body {
             font-family: 'Inter', sans-serif;
         }
-        /* Custom styles for file input */
         .file-input-label {
             transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out;
         }
         .file-input-label.dragover {
-            background-color: #374151; /* gray-700 */
-            border-color: #3b82f6; /* blue-500 */
+            background-color: #374151;
+            border-color: #3b82f6;
         }
-        /* Simple spinner animation */
         .spinner {
             border: 4px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
@@ -59,8 +57,7 @@
     <!-- Result Modal -->
     <div id="result-modal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 hidden z-50">
         <div id="modal-content" class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md text-center transform transition-all scale-95 opacity-0">
-             <!-- Spinner will be injected here -->
-             <!-- Result content will be injected here -->
+             <!-- Content is injected here -->
         </div>
     </div>
 
@@ -78,36 +75,17 @@
 
         // --- File Input & Drag-and-Drop Logic ---
         fileInputLabel.addEventListener('click', () => fileInput.click());
-        
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            fileInputLabel.addEventListener(eventName, preventDefaults, false);
+            fileInputLabel.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
         });
-
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-
         ['dragenter', 'dragover'].forEach(eventName => {
             fileInputLabel.addEventListener(eventName, () => fileInputLabel.classList.add('dragover'), false);
         });
-
         ['dragleave', 'drop'].forEach(eventName => {
             fileInputLabel.addEventListener(eventName, () => fileInputLabel.classList.remove('dragover'), false);
         });
-
-        fileInputLabel.addEventListener('drop', handleDrop, false);
-        fileInput.addEventListener('change', handleFileSelect, false);
-
-        function handleDrop(e) {
-            const dt = e.dataTransfer;
-            const files = dt.files;
-            handleFiles(files);
-        }
-
-        function handleFileSelect(e) {
-            handleFiles(e.target.files);
-        }
+        fileInputLabel.addEventListener('drop', e => handleFiles(e.dataTransfer.files), false);
+        fileInput.addEventListener('change', e => handleFiles(e.target.files), false);
 
         function handleFiles(files) {
             if (files.length > 0) {
@@ -118,19 +96,19 @@
             }
         }
 
-        // --- Form Submission & API Call ---
+        // --- Form Submission ---
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!selectedFile) {
                 showError("Please select a marksheet image first.");
                 return;
             }
-            
             showLoading();
 
             try {
                 const base64Image = await fileToBase64(selectedFile);
-                const result = await callSgpaApi(base64Image);
+                const extractedData = await extractDataFromImage(base64Image);
+                const result = calculateSgpaFromData(extractedData); // Calculation is now in JS
                 showResult(result);
             } catch (error) {
                 console.error('Calculation Error:', error);
@@ -138,56 +116,32 @@
             }
         });
         
-        // --- API Communication (Simulated Backend using Gemini) ---
-        async function callSgpaApi(base64ImageData) {
-            const apiKey = "AIzaSyAOKTE0oayhr74mSLAWlC17BNJhU9yrD_I"; // Leave empty, handled by the environment
+        // --- AI API Call (for data extraction ONLY) ---
+        async function extractDataFromImage(base64ImageData) {
+            // IMPORTANT: Paste your API key here
+            const apiKey = "PASTE_YOUR_API_KEY_HERE"; 
+            if (apiKey === "PASTE_YOUR_API_KEY_HERE") {
+                throw new Error("API Key not found. Please add your Google AI API key in the script.");
+            }
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             
             const prompt = `
-                You are an expert AI assistant specialized in calculating SGPA from Indian university marksheet images.
-                Your task is to analyze the provided marksheet image and calculate the SGPA based on the rules below.
+                You are an AI assistant that ONLY extracts data from an Indian university marksheet image.
+                Your ONLY task is to identify each subject and its marks.
 
-                **Rules and Data:**
-                1.  **Credits Map (Subject Code -> Credits):**
-                    {
-                        "BSC101": 4, "BSC104": 4, "ESC102": 3, "ESC105": 3,
-                        "HSMC102": 2, "LESC104": 2, "MPD101": 1
-                    }
+                Analyze the image and for each subject row, extract the following:
+                1.  'code': The subject code (e.g., "BSC101", "ESC102").
+                2.  'obtained': The total marks obtained. For theory subjects, this is (Internal Obtained + External Obtained). For practical subjects, this is the single marks value shown.
+                3.  'max': The maximum possible marks for the subject. For theory subjects, this is (Internal Max + External Max). For practicals, it's the single max marks value.
 
-                2.  **Grading System (based on percentage of total marks):**
-                    - >= 90%: 10 points (O Grade)
-                    - >= 80% and < 90%: 9 points (A+ Grade)
-                    - >= 70% and < 80%: 8 points (A Grade)
-                    - >= 60% and < 70%: 7 points (B+ Grade)
-                    - >= 50% and < 60%: 6 points (B Grade)
-                    - >= 40% and < 50%: 5 points (C Grade)
-                    - < 40%: 0 points (F Grade)
-
-                3.  **Calculation Steps:**
-                    a. For each subject in the image, identify the Subject Code, Internal Marks, and External Marks.
-                    b. For practical subjects (like LESC104, MPD101), there might be only one marks column. Treat that as the total obtained marks.
-                    c. Calculate Total Obtained Marks = Internal Obtained Marks + External Obtained Marks.
-                    d. Determine the Max Marks for each subject from the image.
-                    e. Calculate Percentage = (Total Obtained Marks / Max Marks) * 100.
-                    f. Find the Grade Point using the Grading System.
-                    g. Find the Credits for the subject using the Credits Map.
-                    h. Calculate Credit Points = Grade Point * Credits.
-                
-                4.  **Final SGPA Calculation:**
-                    SGPA = (Sum of all Credit Points) / (Sum of all Credits)
-                    Round the final SGPA to two decimal places.
-
-                **Output Format:**
-                Respond ONLY with a valid JSON object. Do not include any other text or markdown formatting.
-                The JSON object must have this exact structure:
+                Respond ONLY with a valid JSON object. Do not include any other text, explanations, or markdown formatting.
+                The JSON object must be an array of subjects with this exact structure:
                 {
-                  "sgpa": <number>,
-                  "totalCredits": <number>,
-                  "parsedSubjects": [
-                    { "code": "<string>", "obtainedMarks": <number>, "maxMarks": <number>, "gradePoint": <number> }
+                  "subjects": [
+                    { "code": "<string>", "obtained": <number>, "max": <number> }
                   ]
                 }
-                If you cannot parse the image, respond with: {"error": "Could not read the marksheet. Please ensure the image is clear and upright."}
+                If you cannot read the image, respond with: {"error": "Could not read the marksheet. Please ensure the image is clear and upright."}
             `;
 
             const payload = {
@@ -214,29 +168,75 @@
             if (responseData.candidates && responseData.candidates[0].content.parts[0].text) {
                 const jsonText = responseData.candidates[0].content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
                 const parsedJson = JSON.parse(jsonText);
-                if(parsedJson.error) {
+                if (parsedJson.error) {
                     throw new Error(parsedJson.error);
                 }
-                return parsedJson;
+                if (!parsedJson.subjects) {
+                    throw new Error("AI did not return the expected subject data structure.");
+                }
+                return parsedJson.subjects;
             } else {
                 throw new Error("Failed to get a valid response from the AI. The image might be unreadable.");
             }
         }
 
+        // --- RELIABLE SGPA CALCULATION IN JAVASCRIPT ---
+        function calculateSgpaFromData(subjects) {
+            const CREDITS_MAP = {
+                'BSC101': 4, 'BSC104': 4, 'ESC102': 3, 'ESC105': 3,
+                'HSMC102': 2, 'LESC104': 2, 'MPD101': 1,
+            };
+
+            const getGradePoint = (percentage) => {
+                if (percentage >= 90) return 10;
+                if (percentage >= 80) return 9;
+                if (percentage >= 70) return 8;
+                if (percentage >= 60) return 7;
+                if (percentage >= 50) return 6;
+                if (percentage >= 40) return 5;
+                return 0;
+            };
+
+            let totalCreditPoints = 0;
+            let totalCredits = 0;
+            const detailedSubjects = [];
+
+            for (const subject of subjects) {
+                const credits = CREDITS_MAP[subject.code.toUpperCase()];
+                if (credits === undefined) continue; // Skip if subject from image is not in our credit map
+
+                const percentage = (subject.obtained / subject.max) * 100;
+                const gradePoint = getGradePoint(percentage);
+
+                totalCredits += credits;
+                totalCreditPoints += credits * gradePoint;
+                
+                detailedSubjects.push({
+                    ...subject,
+                    gradePoint
+                });
+            }
+
+            const sgpa = totalCredits > 0 ? (totalCreditPoints / totalCredits) : 0;
+
+            return {
+                sgpa: sgpa,
+                parsedSubjects: detailedSubjects
+            };
+        }
+
         // --- UI Modal and State Management ---
         function showLoading() {
             resultModal.classList.remove('hidden');
-            modalContent.innerHTML = '<div class="spinner mx-auto"></div><p class="mt-4">Analyzing your marksheet...</p>';
-            setTimeout(() => {
-                modalContent.classList.remove('scale-95', 'opacity-0');
-            }, 10);
+            modalContent.innerHTML = '<div class="spinner mx-auto"></div><p class="mt-4">Reading your marksheet...</p>';
+            setTimeout(() => { modalContent.classList.remove('scale-95', 'opacity-0'); }, 10);
         }
 
         function showResult(result) {
             let subjectsHtml = result.parsedSubjects.map(s => `
                 <li class="flex justify-between items-center text-sm text-gray-300">
                     <span>${s.code}</span>
-                    <span>${s.obtainedMarks}/${s.maxMarks} (GP: ${s.gradePoint})</span>
+                    <span>${s.obtained}/${s.max} (GP: ${s.gradePoint})</span>
                 </li>
             `).join('');
 
@@ -247,7 +247,7 @@
                 <h3 class="text-2xl font-bold mt-4">Your SGPA is</h3>
                 <p class="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-green-300 to-blue-400 my-2">${result.sgpa.toFixed(2)}</p>
                 <div class="text-left bg-gray-700 p-3 rounded-lg mt-4">
-                    <h4 class="font-semibold mb-2 text-gray-100">Parsed Subjects:</h4>
+                    <h4 class="font-semibold mb-2 text-gray-100">Calculation Breakdown:</h4>
                     <ul class="space-y-1">${subjectsHtml}</ul>
                 </div>
                 <button onclick="closeModal()" class="mt-6 w-full bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Close</button>
@@ -264,19 +264,14 @@
                 <p class="text-gray-300 mt-2">${message}</p>
                 <button onclick="closeModal()" class="mt-6 w-full bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">Try Again</button>
             `;
-            setTimeout(() => {
-                modalContent.classList.remove('scale-95', 'opacity-0');
-            }, 10);
+            setTimeout(() => { modalContent.classList.remove('scale-95', 'opacity-0'); }, 10);
         }
 
         function closeModal() {
             modalContent.classList.add('scale-95', 'opacity-0');
-            setTimeout(() => {
-                resultModal.classList.add('hidden');
-            }, 200);
+            setTimeout(() => { resultModal.classList.add('hidden'); }, 200);
         }
         
-        // --- Helper Functions ---
         function fileToBase64(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
